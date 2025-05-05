@@ -49,6 +49,15 @@ const onlineUsers = new Map();
 const onlineGroups = new Map();
 let groupOnlineUsers = new Map();
 
+function getUserIdBySocketId(socketId) {
+  for (const [userId, storedSocketId] of onlineUsers.entries()) {
+    if (storedSocketId === socketId) {
+      return userId;
+    }
+  }
+  return null; // Not found
+}
+
 // Socket.IO events
 io.on("connection", (socket) => {
   console.log("A user connected:", socket.id);
@@ -76,8 +85,6 @@ io.on("connection", (socket) => {
     io.emit("updateOnlineStatus", { userId, status: true }); // Notify all clients
     socket.emit("allOnlineUsers", Array.from(onlineUsers.keys()));
     socket.emit("allOnlineGroups", Array.from(onlineGroups.keys()));
-    console.log(onlineUsers);
-    console.log("group", onlineGroups);
   });
 
   // Listen for custom events, e.g., 'message'
@@ -126,8 +133,6 @@ io.on("connection", (socket) => {
               const receiverSocketId = onlineUsers.get(memberId);
 
               if (receiverSocketId) {
-                console.log(`Sending to: ${memberId} -> ${receiverSocketId}`);
-
                 io.to(receiverSocketId).emit("receiveGroupMessage", {
                   message,
                   fileUrls,
@@ -136,11 +141,34 @@ io.on("connection", (socket) => {
                   groupId,
                   timestamp: new Date(),
                 });
+
+                io.to(receiverSocketId).emit("playNotification", {
+                  senderId,
+                  groupId,
+                });
+
+                // 💡 Emit messageUpdate for conversation list sorting
+                io.to(receiverSocketId).emit("messageUpdate", {
+                  type: "group",
+                  id: groupId,
+                  name: group.name,
+                  text: message,
+                  timestamp: new Date(),
+                });
+
+                const senderSocketId = onlineUsers.get(senderId);
+                if (senderSocketId) {
+                  io.to(senderSocketId).emit("messageUpdate", {
+                    type: "group",
+                    id: receiverId,
+                    name: "", // Can be filled from cached UI
+                    text: message,
+                    timestamp: new Date(),
+                  });
+                }
               }
             }
           });
-
-          console.log("Group message sent:", message);
         } else {
           // Private message logic
           const messageModel = new Message({
@@ -160,15 +188,118 @@ io.on("connection", (socket) => {
               senderName: sender.name,
               timestamp: new Date(),
             });
-          }
 
-          console.log("Private message sent:", message);
+            io.to(receiverSocketId).emit("playNotification", {
+              senderId,
+              groupId,
+            });
+
+            // 💡 Emit messageUpdate for conversation list sorting
+            io.to(receiverSocketId).emit("messageUpdate", {
+              type: "friend",
+              id: senderId,
+              name: sender.name,
+              text: message,
+              timestamp: new Date(),
+            });
+
+            const senderSocketId = onlineUsers.get(senderId);
+            if (senderSocketId) {
+              io.to(senderSocketId).emit("messageUpdate", {
+                type: "friend",
+                id: receiverId,
+                name: "", // Can be filled from cached UI
+                text: message,
+                timestamp: new Date(),
+              });
+            }
+          }
         }
       } catch (error) {
         console.error("Error sending message:", error);
       }
     }
   );
+
+  socket.on("mark-as-read", async ({ friendId, groupId, readerId }) => {
+    try {
+      const filter = groupId
+        ? {
+            groupId,
+            senderId: { $ne: readerId },
+            "readBy.userId": { $ne: readerId },
+          }
+        : {
+            senderId: friendId,
+            receiverId: readerId,
+            isRead: false,
+          };
+
+      const update = groupId
+        ? {
+            $addToSet: {
+              readBy: { userId: readerId, timestamp: new Date() },
+            },
+            $set: { isRead: true },
+          }
+        : { isRead: true };
+
+      await Message.updateMany(filter, update);
+
+      // 📨 Notify original sender (or group members)
+      if (groupId) {
+        io.to(groupId).emit("messages-read-by", {
+          readerId,
+          groupId,
+        });
+      } else {
+        io.to(friendId).emit("messages-read-by", {
+          readerId,
+          friendId,
+        });
+      }
+
+      const senderSocketId = onlineUsers.get(readerId);
+      io.to(senderSocketId).emit("messageUpdate", {
+        type: "group",
+        id: groupId,
+        timestamp: new Date(),
+      });
+
+      const receiverSocketId = onlineUsers.get(friendId);
+      io.to(receiverSocketId).emit("readMessageUpdate", {
+        type: "friend",
+        id: friendId,
+      });
+    } catch (err) {
+      console.error("Socket read update error:", err);
+    }
+  });
+
+  socket.on("call-user", ({ to, offer }) => {
+    console.log("call to - ", to);
+
+    const receiverSocketId = onlineUsers.get(to);
+    //const senderId = getUserIdBySocketId(socket.id);
+    io.to(receiverSocketId).emit("incoming-call", { from: socket.id, offer });
+  });
+
+  socket.on("answer-call", ({ to, answer }) => {
+    console.log("answer to - ", to);
+    //const receiverSocketId = onlineUsers.get(to);
+    //const senderId = getUserIdBySocketId(socket.id);
+    io.to(to).emit("call-answered", { from: socket.id, answer });
+  });
+
+  socket.on("ice-candidate", ({ to, candidate }) => {
+    console.log("ice-candidate - ", to);
+    //const receiverSocketId = onlineUsers.get(to);
+    //const senderId = getUserIdBySocketId(socket.id);
+    io.to(to).emit("ice-candidate", {
+      from: socket.id,
+      candidate,
+    });
+  });
 
   // Listen for disconnect event
   socket.on("disconnect", async () => {
@@ -221,6 +352,6 @@ io.on("connection", (socket) => {
 });
 
 // Start the server
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on http://0.0.0.0:${PORT}`);
 });

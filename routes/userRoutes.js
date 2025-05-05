@@ -90,15 +90,29 @@ router.post("/register", async (req, res) => {
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-
     // Find user by email
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: "Invalid email or password" });
     }
-
     // Compare password
+    // const bcrypt = require("bcrypt");
+
+    // (async () => {
+    //   const password = "123456";
+
+    //   // Generate a new salt and hash
+    //   const salt = await bcrypt.genSalt(10);
+    //   const hashedPassword = await bcrypt.hash(password, salt);
+
+    //   console.log("Generated Hash:", hashedPassword); // Log the generated hash
+
+    //   // Now compare
+    //   const isMatch = await bcrypt.compare(password, hashedPassword);
+    //   console.log("Password match?", isMatch); // Should log 'true'
+    // })();
     const isMatch = await bcrypt.compare(password, user.password);
+    //console.log(isMatch);
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid email or password" });
     }
@@ -382,15 +396,23 @@ router.get("/friends-and-groups", authenticate, async (req, res) => {
     // Fetch last message for each friend
     const friendMessages = await Promise.all(
       friends.map(async (friend) => {
-        const lastMessage = await Message.findOne({
-          $or: [
-            { senderId: userId, receiverId: friend._id },
-            { senderId: friend._id, receiverId: userId },
-          ],
-        })
-          .sort({ timestamp: -1 })
-          .limit(1)
-          .lean();
+        const [lastMessage, unreadCount] = await Promise.all([
+          Message.findOne({
+            $or: [
+              { senderId: userId, receiverId: friend._id },
+              { senderId: friend._id, receiverId: userId },
+            ],
+          })
+            .sort({ timestamp: -1 })
+            .limit(1)
+            .lean(),
+
+          Message.countDocuments({
+            senderId: friend._id,
+            receiverId: userId,
+            isRead: false,
+          }),
+        ]);
 
         return {
           type: "friend",
@@ -399,6 +421,7 @@ router.get("/friends-and-groups", authenticate, async (req, res) => {
           profilePicture: friend.profilePicture,
           lastMessage: lastMessage ? lastMessage.text : "No messages yet",
           lastMessageTime: lastMessage ? lastMessage.timestamp : null,
+          unreadCount,
         };
       })
     );
@@ -406,10 +429,19 @@ router.get("/friends-and-groups", authenticate, async (req, res) => {
     // Fetch last message for each group
     const groupMessages = await Promise.all(
       groups.map(async (group) => {
-        const lastMessage = await Message.findOne({ groupId: group._id })
-          .sort({ timestamp: -1 })
-          .limit(1)
-          .lean();
+        const [lastMessage, unreadCount] = await Promise.all([
+          Message.findOne({ groupId: group._id })
+            .sort({ timestamp: -1 })
+            .limit(1)
+            .lean(),
+
+          Message.countDocuments({
+            groupId: group._id,
+            isRead: false,
+            // Optional: if you're using read-tracking per member:
+            // "readBy.userId": { $ne: userId }
+          }),
+        ]);
 
         return {
           type: "group",
@@ -418,6 +450,7 @@ router.get("/friends-and-groups", authenticate, async (req, res) => {
           profilePicture: null,
           lastMessage: lastMessage ? lastMessage.text : "No messages yet",
           lastMessageTime: lastMessage ? lastMessage.timestamp : null,
+          unreadCount,
         };
       })
     );
@@ -516,6 +549,51 @@ router.get("/messages", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Error fetching messages" });
+  }
+});
+
+// Route: POST /api/messages/mark-as-read
+router.post("/messages/mark-as-read", authenticate, async (req, res) => {
+  const { friendId, groupId } = req.body;
+  const userId = req.user._id;
+  console.log(req.body);
+  try {
+    if (groupId) {
+      const query = {
+        groupId,
+        senderId: { $ne: userId }, // only messages sent by others
+        "readBy.userId": { $ne: userId }, // not already read by this user
+      };
+
+      const update = {
+        $addToSet: {
+          readBy: { userId, timestamp: new Date() },
+        },
+        $set: {
+          isRead: true,
+        },
+      };
+
+      const result = await Message.updateMany(query, update);
+      console.log("Updated group messages:", result.modifiedCount);
+    } else if (friendId) {
+      const query = {
+        senderId: friendId,
+        receiverId: userId,
+        isRead: 0,
+      };
+
+      const messages = await Message.find(query);
+      console.log("Found private messages to update:", messages.length);
+
+      const update = { isRead: 1 };
+      await Message.updateMany(query, update);
+    }
+
+    res.status(200).json({ message: "Messages marked as read" });
+  } catch (error) {
+    console.error("Mark as read error:", error);
+    res.status(500).json({ message: "Failed to mark messages as read" });
   }
 });
 

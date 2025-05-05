@@ -22,7 +22,12 @@ const messageSchema = new mongoose.Schema({
     default: [],
   },
   isRead: { type: Number, default: 0 },
-  readBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+  readBy: [
+    {
+      userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      timestamp: { type: Date, default: Date.now },
+    },
+  ],
   timestamp: { type: Date, default: Date.now },
 });
 
