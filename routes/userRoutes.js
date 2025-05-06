@@ -35,7 +35,7 @@ router.post("/upload", authenticate, upload.array("files"), (req, res) => {
   }
 
   const fileUrls = req.files.map(
-    (file) => `http://localhost:3010/uploads/${file.filename}`
+    (file) => `${process.env.FILE_URL}/${file.filename}`
   );
 
   res.json({ success: true, fileUrls });
@@ -52,7 +52,7 @@ router.post(
         .json({ success: false, error: "No files uploaded" });
     }
 
-    const fileUrl = `http://localhost:3010/uploads/${req.file.filename}`;
+    const fileUrl = `${process.env.FILE_URL}/${req.file.filename}`;
 
     res.json({ success: true, fileUrl });
   }
