@@ -54,8 +54,9 @@ const server = http.createServer(app);
 const io = new Server(server, {
   connectionStateRecovery: {},
   cors: {
-    origin: "*", // Replace with your frontend URL in production
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 const onlineUsers = new Map();
