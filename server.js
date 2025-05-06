@@ -6,11 +6,24 @@ const { Server } = require("socket.io");
 const User = require("./models/userModel");
 const Message = require("./models/messageModel");
 const Group = require("./models/groupModel");
+const cors = require("cors");
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+const allowedOrigins = [
+  "https://chat.motionsoft.com.bd",
+  // Add other allowed domains if needed
+];
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  })
+);
 
 // Middleware
 app.use(express.json());
