@@ -137,6 +137,7 @@ io.on("connection", (socket) => {
                   message,
                   fileUrls,
                   senderId,
+                  receiverId,
                   senderName: sender.name,
                   groupId,
                   timestamp: new Date(),
@@ -185,6 +186,7 @@ io.on("connection", (socket) => {
               message,
               fileUrls,
               senderId,
+              receiverId,
               senderName: sender.name,
               timestamp: new Date(),
             });
