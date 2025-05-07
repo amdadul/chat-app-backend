@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const User = require("../models/userModel");
 const jwt = require("jsonwebtoken"); // For generating tokens
 const bcrypt = require("bcrypt");
@@ -230,12 +231,31 @@ router.post("/accept-friend", authenticate, async (req, res) => {
   const { friendId } = req.body; // ID of the user who sent the friend request
   const userId = req.user._id; // Current logged-in user's ID
 
+  const friendObjectId = new mongoose.Types.ObjectId(friendId);
+
   try {
     // Step 1: Update the logged-in user's FriendList to accept the request
+
+    //const receiverSocketId = onlineUsers.get(friendId);
+
     const userFriendList = await FriendList.findOneAndUpdate(
-      { userId, "friends.friendId": friendId, "friends.status": "requested" },
-      { $set: { "friends.$.status": "accepted" } },
-      { new: true }
+      {
+        userId,
+      },
+      {
+        $set: {
+          "friends.$[elem].status": "accepted",
+        },
+      },
+      {
+        new: true,
+        arrayFilters: [
+          {
+            "elem.friendId": friendObjectId,
+            "elem.status": "requested",
+          },
+        ],
+      }
     );
 
     if (!userFriendList) {
@@ -243,14 +263,25 @@ router.post("/accept-friend", authenticate, async (req, res) => {
     }
 
     // Step 2: Update the friend's FriendList to mark the user as accepted
+
     const friendFriendList = await FriendList.findOneAndUpdate(
       {
-        userId: friendId,
-        "friends.friendId": userId,
-        "friends.status": "pending",
+        userId: friendObjectId,
       },
-      { $set: { "friends.$.status": "accepted" } },
-      { new: true }
+      {
+        $set: {
+          "friends.$[elem].status": "accepted",
+        },
+      },
+      {
+        new: true,
+        arrayFilters: [
+          {
+            "elem.friendId": userId, // userId is already an ObjectId
+            "elem.status": "pending",
+          },
+        ],
+      }
     );
 
     if (!friendFriendList) {

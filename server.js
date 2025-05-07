@@ -7,6 +7,7 @@ const User = require("./models/userModel");
 const Message = require("./models/messageModel");
 const Group = require("./models/groupModel");
 const cors = require("cors");
+const FriendList = require("./models/friendListModel");
 
 dotenv.config();
 
@@ -292,6 +293,81 @@ io.on("connection", (socket) => {
       });
     } catch (err) {
       console.error("Socket read update error:", err);
+    }
+  });
+
+  socket.on("accept-friend-request", async ({ friendId, userId }, callback) => {
+    try {
+      const userFriendList = await FriendList.findOneAndUpdate(
+        {
+          userId,
+        },
+        {
+          $set: {
+            "friends.$[elem].status": "accepted",
+          },
+        },
+        {
+          new: true,
+          arrayFilters: [
+            {
+              "elem.friendId": friendId,
+              "elem.status": "requested",
+            },
+          ],
+        }
+      );
+
+      if (!userFriendList) {
+        return callback({ status: 404, message: "Friend request not found." });
+      }
+
+      // Step 2: Update the friend's FriendList to mark the user as accepted
+
+      const friendFriendList = await FriendList.findOneAndUpdate(
+        {
+          userId: friendId,
+        },
+        {
+          $set: {
+            "friends.$[elem].status": "accepted",
+          },
+        },
+        {
+          new: true,
+          arrayFilters: [
+            {
+              "elem.friendId": userId, // userId is already an ObjectId
+              "elem.status": "pending",
+            },
+          ],
+        }
+      );
+
+      const receiverSocketId = onlineUsers.get(friendId);
+      io.to(receiverSocketId).emit("messageUpdate", {
+        type: "friend",
+        id: friendId,
+        timestamp: new Date(),
+      });
+
+      if (!friendFriendList) {
+        return callback({
+          status: 404,
+          message: "Friend request not found for the friend.",
+        });
+      }
+
+      return callback({
+        status: 200,
+        message: "Friend request accepted successfully.",
+      });
+    } catch (err) {
+      console.error("Socket read update error:", err);
+      callback({
+        status: 500,
+        message: "An error occurred while processing the friend request.",
+      });
     }
   });
 
