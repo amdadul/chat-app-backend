@@ -14,7 +14,13 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const allowedOrigins = ["https://chat.motionsoft.com.bd"];
+//const allowedOrigins = ["https://chat.motionsoft.com.bd"];
+
+const allowedOrigins = [
+  "https://chat.motionsoft.com.bd",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+];
 
 app.use(
   cors({
